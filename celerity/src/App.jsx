@@ -4,7 +4,7 @@ import Editor from './components/editor';
 import SidePanel from './components/sidepanel';
 import Terminal from './components/terminal';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API_URL = "https://final-celerity-compiler-production.up.railway.app";
 
 function App() {
   const [code, setCode] = useState(`main(){\n  #Welcome To Celerity Compiler!\n} \n`);
