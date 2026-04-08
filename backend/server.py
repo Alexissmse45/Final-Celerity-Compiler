@@ -7,10 +7,7 @@ from code_gen import CodeGenerator
 from tac_interpreter import TACInterpreter, count_inputs, get_input_types
 
 app = Flask(__name__)
-CORS(app, origins=[
-    "http://localhost:3000",
-    "https://your-app.vercel.app"
-])
+CORS(app)
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
@@ -38,7 +35,7 @@ def analyze():
 
         output_lines = []
 
-        # ── PHASE 1: LEXICAL ─────────────────────────────────────────────────
+        # PHASE 1: LEXICAL
         lexer = Lexer()
         tokens, lexer_errors = lexer.lexeme(code)
         if lexer_errors:
@@ -54,8 +51,8 @@ def analyze():
         if analysis_type == 'lexical':
             result.update(output='\n'.join(output_lines), activeAnalysis='lexical')
             return jsonify(result)
-        #print("TOKENS:", [(t[0], t[1]) for t in tokens])#FOR TESTING HIHI
-        # ── PHASE 2: SYNTAX ──────────────────────────────────────────────────
+
+        # PHASE 2: SYNTAX
         parser = LL1Parser(cfg, parse_table, follow_set)
         parse_success, syntax_errors = parser.parse(tokens)
         if not parse_success:
@@ -71,7 +68,7 @@ def analyze():
             result.update(output='\n'.join(output_lines), activeAnalysis='syntax')
             return jsonify(result)
 
-        # ── PHASE 3: SEMANTIC ────────────────────────────────────────────────
+        # PHASE 3: SEMANTIC
         try:
             sem        = Semantic()
             sem_errors = sem.semantic_analyzer(tokens)
@@ -95,7 +92,6 @@ def analyze():
             output_lines.append('✓ Semantic analysis passed')
 
         except Exception as e:
-            import traceback; traceback.print_exc()
             result.update(success=False,
                           semanticErrors=[f"Semantic error: {e}"], errors=[f"Semantic error: {e}"],
                           output='\n'.join(output_lines + ['✗ Semantic analysis failed']),
@@ -106,32 +102,19 @@ def analyze():
             result.update(output='\n'.join(output_lines), activeAnalysis='semantic')
             return jsonify(result)
 
-        # ── PHASE 4: CODE GEN + RUN ──────────────────────────────────────────
+        # PHASE 4: CODE GEN + RUN
         try:
             gen = CodeGenerator()
             gen.generate(tokens)
-
-            print("=" * 50)
-            print("TAC INSTRUCTIONS:")
-            for i, ins in enumerate(gen.tac):
-                print(f"  {i}: {ins}")
-            print("=" * 50)
-
             result['tacCode'] = "\n".join(str(i) for i in gen.tac)
 
             interp = TACInterpreter()
             _, events = interp.run(gen.tac, user_inputs=[])
 
-            print("EVENTS:")
-            for e in events:
-                print(f"  {e}")
-            print("=" * 50)
-
             result['programEvents'] = events
             output_lines.append('✓ Code generation passed')
 
         except Exception as e:
-            import traceback; traceback.print_exc()
             result.update(success=False, errors=[f"Code gen error: {e}"],
                           output='\n'.join(output_lines + ['✗ Code generation failed']),
                           activeAnalysis='codegen')
@@ -141,7 +124,7 @@ def analyze():
         return jsonify(result)
 
     except Exception as e:
-        import traceback; print(traceback.format_exc())
+        import traceback; traceback.print_exc()
         return jsonify({'success': False, 'errors': [f'Server error: {str(e)}'],
                         'syntaxErrors': [], 'semanticErrors': [], 'tokens': [],
                         'syntaxTree': None, 'semanticInfo': None,
@@ -158,28 +141,14 @@ def run_with_inputs():
 
         lexer = Lexer()
         tokens, _ = lexer.lexeme(code)
-
         gen = CodeGenerator()
         gen.generate(tokens)
-
-        print("=" * 50)
-        print("TAC INSTRUCTIONS (/run):")
-        for i, ins in enumerate(gen.tac):
-            print(f"  {i}: {ins}")
-        print("=" * 50)
-
         interp = TACInterpreter()
         _, events = interp.run(gen.tac, user_inputs=user_inputs)
-
-        print("EVENTS (/run):")
-        for e in events:
-            print(f"  {e}")
-        print("=" * 50)
-
         return jsonify({'success': True, 'events': events})
 
     except Exception as e:
-        import traceback; print(traceback.format_exc())
+        import traceback; traceback.print_exc()
         return jsonify({'success': False, 'error': str(e), 'events': []})
 
 
