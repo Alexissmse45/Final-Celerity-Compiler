@@ -7,7 +7,10 @@ from code_gen import CodeGenerator
 from tac_interpreter import TACInterpreter, count_inputs, get_input_types
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=[
+    "http://localhost:3000",
+    "https://your-app.vercel.app"
+])
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
