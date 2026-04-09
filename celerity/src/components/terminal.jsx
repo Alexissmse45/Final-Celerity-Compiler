@@ -40,10 +40,17 @@ const Terminal = ({
     outputEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [events, running]);
 
+  // All input_prompt events in the current events list
   const inputPrompts = events.filter(e => e.type === 'input_prompt');
-  const allFilled    = inputPrompts.length > 0
-    && inputPrompts.every(e => (inputValues[e.inputIndex] ?? '').trim() !== '')
-    && inputPrompts.every(e => !inputErrors[e.inputIndex]);
+
+  // A prompt is "pending" (needs user input) if its userValue is empty
+  const pendingPrompts = inputPrompts.filter(e => (e.userValue ?? '') === '');
+
+  // Only pending prompts need to be filled by the user
+  const allFilled =
+    pendingPrompts.length > 0 &&
+    pendingPrompts.every(e => (inputValues[e.inputIndex] ?? '').trim() !== '') &&
+    pendingPrompts.every(e => !inputErrors[e.inputIndex]);
 
   const handleChange = (idx, val, itype) => {
     setInputValues(prev => ({ ...prev, [idx]: val }));
@@ -70,13 +77,11 @@ const Terminal = ({
     if (e.key !== 'Enter') return;
     e.preventDefault();
     const val = (inputValues[idx] ?? '').trim();
-    if (val === '' || inputErrors[idx]) return; // block on empty or invalid input
-    const pos = inputPrompts.findIndex(p => p.inputIndex === idx);
-    if (pos < inputPrompts.length - 1) {
-      // Move to next input only if current is filled
-      inputRefs.current[inputPrompts[pos + 1].inputIndex]?.focus();
+    if (val === '' || inputErrors[idx]) return;
+    const pos = pendingPrompts.findIndex(p => p.inputIndex === idx);
+    if (pos < pendingPrompts.length - 1) {
+      inputRefs.current[pendingPrompts[pos + 1].inputIndex]?.focus();
     } else if (allFilled) {
-      // Last input filled — submit
       submitAll();
     }
   };
@@ -84,8 +89,16 @@ const Terminal = ({
   const submitAll = async () => {
     if (running || submitted) return;
     setRunning(true);
-    const ordered    = [...inputPrompts].sort((a, b) => a.inputIndex - b.inputIndex);
-    const userInputs = ordered.map(p => (inputValues[p.inputIndex] ?? '').trim());
+
+    // Build the full ordered input list:
+    // already-answered inputs (from ev.userValue) + newly typed pending inputs
+    const allOrdered = [...inputPrompts].sort((a, b) => a.inputIndex - b.inputIndex);
+    const userInputs = allOrdered.map(p =>
+      (p.userValue ?? '') !== ''
+        ? p.userValue                                  // already answered
+        : (inputValues[p.inputIndex] ?? '').trim()    // newly typed
+    );
+
     try {
       const res  = await fetch(`${API_URL}/run`, {
         method: 'POST',
@@ -93,16 +106,36 @@ const Terminal = ({
         body: JSON.stringify({ code: sourceCode, userInputs })
       });
       const data = await res.json();
+
       if (data.events?.length) {
-        setEvents(data.events);
-        setSubmitted(true);
+        const newEvents = data.events;
+        const newPending = newEvents.filter(
+          e => e.type === 'input_prompt' && (e.userValue ?? '') === ''
+        );
+
+        if (newPending.length > 0) {
+          // Program stopped at another input — show it, don't mark as submitted
+          setEvents(newEvents);
+          setInputValues({});
+          setInputErrors({});
+          setSubmitted(false);
+          setTimeout(() => {
+            inputRefs.current[newPending[0].inputIndex]?.focus();
+          }, 80);
+        } else {
+          // Program ran to completion
+          setEvents(newEvents);
+          setSubmitted(true);
+        }
       } else {
         setEvents(prev => [...prev,
           { type: 'output', text: data.error ? `[error: ${data.error}]` : '[no output]' }
         ]);
+        setSubmitted(true);
       }
     } catch (err) {
       setEvents(prev => [...prev, { type: 'output', text: `[connection error: ${err.message}]` }]);
+      setSubmitted(true);
     }
     setRunning(false);
   };
@@ -154,45 +187,47 @@ const Terminal = ({
 
     if (row.type === 'input_prompt') {
       const { promptText, ev } = row;
-      const idx    = ev.inputIndex;
-      const isDone = submitted || (ev.userValue !== '' && ev.userValue != null);
+      const idx = ev.inputIndex;
+
+      // A row is "done" (locked) only if it has a real filled userValue
+      const isDone = (ev.userValue ?? '') !== '';
       const value  = isDone
-        ? (ev.userValue || inputValues[idx] || '')
+        ? ev.userValue
         : (inputValues[idx] ?? '');
 
       return (
         <div key={i}>
-          <div style={{ display: 'flex', alignItems: 'baseline', whiteSpace: 'pre' }}>
-          {promptText ? <span>{promptText}</span> : null}
-          {isDone ? (
-            <span style={{ color: '#8B5E3C', fontWeight: 'bold' }}>{value}</span>
-          ) : (
-            <input
-              ref={el => inputRefs.current[idx] = el}
-              type="text"
-              value={value}
-              onChange={e => handleChange(idx, e.target.value, ev.inputType)}
-              onKeyDown={e => handleKeyDown(e, idx)}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                borderBottom: `1px solid ${inputErrors[idx] ? '#DC3545' : '#8B7355'}`,
-                outline: 'none',
-                fontFamily: 'Consolas, monospace',
-                fontSize: '9pt',
-                color: inputErrors[idx] ? '#DC3545' : '#8B5E3C',
-                minWidth: '60px',
-                width: `${Math.max(60, (value.length + 2) * 7.8)}px`,
-                padding: 0,
-              }}
-            />
-          )}
+          <div style={{ display: 'flex', alignItems: 'baseline', whiteSpace: 'pre', flexWrap: 'wrap' }}>
+            {promptText ? <span>{promptText}</span> : null}
+            {isDone ? (
+              <span style={{ color: '#8B5E3C', fontWeight: 'bold' }}>{value}</span>
+            ) : (
+              <input
+                ref={el => inputRefs.current[idx] = el}
+                type="text"
+                value={value}
+                onChange={e => handleChange(idx, e.target.value, ev.inputType)}
+                onKeyDown={e => handleKeyDown(e, idx)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  borderBottom: `1px solid ${inputErrors[idx] ? '#DC3545' : '#8B7355'}`,
+                  outline: 'none',
+                  fontFamily: 'Consolas, monospace',
+                  fontSize: '9pt',
+                  color: inputErrors[idx] ? '#DC3545' : '#8B5E3C',
+                  minWidth: '60px',
+                  width: `${Math.max(60, (value.length + 2) * 7.8)}px`,
+                  padding: 0,
+                }}
+              />
+            )}
+          </div>
           {!isDone && inputErrors[idx] && (
             <div style={{ color: '#DC3545', fontSize: '8pt', paddingLeft: '2px', marginTop: '1px' }}>
               ⚠️ {inputErrors[idx]}
             </div>
           )}
-          </div>
         </div>
       );
     }
@@ -265,27 +300,23 @@ const Terminal = ({
         {activeTab === 'tac' && (
           <div className="flex-1 overflow-auto p-3">
             {tacCode && tacCode.trim().length > 0 ? (() => {
-              // ── TAC parser: converts raw TAC lines into table rows ──
               const lines = tacCode.split('\n').filter(l => l.trim());
 
-              // Rename _t0→T1, _t1→T2 etc and _for_st0→L1 etc
               const tempMap = {}, labelMap = {};
               let tempCount = 1, labelCount = 1;
               const rename = (s) => {
                 if (!s) return s;
-                return s.replace(/_t(\d+)/g, (_, n) => {
+                return s.replace(/_t(\d+)/g, (_, n) => {
                   const key = `_t${n}`;
                   if (!tempMap[key]) tempMap[key] = `T${tempCount++}`;
                   return tempMap[key];
-                }).replace(/(_(?:for_st|for_end|wh_st|wh_end|do_st|do_end|if_end|else|sw_end|sw_skip|sw_case|sw_def|L)\w*)/g, (_, lbl) => {
+                }).replace(/(_(?:for_st|for_end|wh_st|wh_end|do_st|do_end|if_end|else|sw_end|sw_skip|sw_case|sw_def|L)\w*)/g, (_, lbl) => {
                   if (!labelMap[lbl]) labelMap[lbl] = `L${labelCount++}`;
                   return labelMap[lbl];
                 });
               };
 
-              // Pre-scan to build rename maps
               lines.forEach(l => { rename(l); });
-              // Reset counts for actual rendering
               Object.keys(tempMap).forEach(k => delete tempMap[k]);
               Object.keys(labelMap).forEach(k => delete labelMap[k]);
               tempCount = 1; labelCount = 1;
@@ -294,11 +325,9 @@ const Terminal = ({
                 const s = raw.trim();
                 if (!s || s.startsWith('func_begin') || s.startsWith('func_end')) return null;
 
-                // Label
                 if (s.endsWith(':')) {
                   return { type: 'label', label: rename(s.slice(0,-1)) };
                 }
-                // declare
                 if (s.startsWith('declare ')) {
                   let rest = s.slice(8);
                   ['const int ','const double ','const char* ','const bool ',
@@ -309,41 +338,33 @@ const Terminal = ({
                     const [name, val] = rest.split(' = ');
                     return { type:'row', op:'=', a1:rename(val), a2:'', res:rename(name) };
                   }
-                  return null; // skip bare declares
+                  return null;
                 }
-                // if_false
                 if (s.startsWith('if_false ')) {
                   const rest = s.slice(9);
                   const [cond, label] = rest.split(' goto ');
                   return { type:'row', op:'if FALSE', a1:rename(cond), a2:'', res:rename(label) };
                 }
-                // goto
                 if (s.startsWith('goto ')) {
                   return { type:'row', op:'goto', a1:rename(s.slice(5)), a2:'', res:'' };
                 }
-                // print
                 if (s.startsWith('print[')) {
                   const val = s.includes('] ') ? s.split('] ')[1] : '';
                   const clean = val.replace(/^"|"$/g,'');
                   return { type:'row', op:'out', a1:clean === '\\n' ? '\\n' : clean, a2:'', res:'' };
                 }
-                // return
                 if (s.startsWith('return')) {
                   const val = s.slice(6).trim();
                   if (val === '0' || val === '') return { type:'exit' };
                   return { type:'row', op:'return', a1:rename(val), a2:'', res:'' };
                 }
-                // var++ / var--
                 if (s.endsWith('++')) return { type:'row', op:'+', a1:rename(s.slice(0,-2)), a2:'1', res:rename(s.slice(0,-2)) };
                 if (s.endsWith('--')) return { type:'row', op:'-', a1:rename(s.slice(0,-2)), a2:'1', res:rename(s.slice(0,-2)) };
-                // result = expr
                 if (s.includes(' = ')) {
                   const eq = s.indexOf(' = ');
                   const result = s.slice(0, eq);
                   const rhs = s.slice(eq+3);
-                  const binOps = ['<=','>=','==','!=','&&','||','<','>','\*\*','+','-','\*','/','%'];
                   for (const bop of ['<=','>=','==','!=','&&','||','<','>','**','+','-','*','/','%']) {
-                    const pat = ` ${bop.replace('*','\*')} `;
                     const idx = rhs.indexOf(` ${bop} `);
                     if (idx >= 0) {
                       const left = rhs.slice(0, idx);
