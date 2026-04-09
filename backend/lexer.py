@@ -50,10 +50,10 @@ class Lexer:
         self.delim1 = self.space | self.colon
         self.delim2 = {')'} | self.comma | self.space | self.semicolon
         self.delim3 = {')'} | self.alphadigit | self.semicolon | self.space  #nagdagdag aq whitespace same sa delim4&5 
-        self.delim4 = {';', '('} | self.alphadigit | self.space 
+        self.delim4 = {';', '(', ')'} | self.alphadigit | self.space 
         self.delim5 = {'~', '(', '+' , '-'} | self.digit | self.space
         self.delim6 = {'('} | self.alphadigit 
-        self.delim7 = {'~', '"', "'", '(', ')'} | self.alphadigit | self.space
+        self.delim7 = {'~', '"', "'", '('} | self.alphadigit | self.space
         self.delim8 = {'~', '"', '(' , '{'} | self.alphadigit | self.space
         self.delim9 = {'(', ')', '!', "'", '"'} | self.alphadigit | self.space
         self.delim10 = {'{', ')', '<', '>', '=', '|', '&', '+', '-', '/', '*', '%', '"'} | self.semicolon | self.space | self.newln | self.colon | self.comma
