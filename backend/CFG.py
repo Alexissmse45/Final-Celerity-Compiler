@@ -55,7 +55,8 @@ cfg = {
         ["λ"]],
 
     "<size>": [
-        ["num_literal"]],
+        ["num_literal"],
+        ["identifier"]],
 
     "<array_after>": [
         [";"],
@@ -76,8 +77,7 @@ cfg = {
 
     "<struct_after>": [
         ["{", "<member_dec>", "}"],
-        ["identifier", "<struct_initialize>"]
-    ],
+        ["identifier", "<struct_initialize>"]],
 
     "<struct_initialize>": [
         [";"],
