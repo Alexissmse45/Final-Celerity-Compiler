@@ -28,18 +28,17 @@ class TACInterpreter:
         self._input_queue = []
         self._input_types = []
         self._input_index = 0
-        self._buf         = ""   # buffer for no-newline print segments
+        self._buf         = ""
+        self._scan_mode   = False   # True = initial scan (no real inputs yet)
 
     def run(self, tac_list, user_inputs=None):
         """
         Execute TAC. Returns (plain_string, events).
-        events = list of:
-          { type:'output', text:'...' }
-          { type:'input_prompt', text:'enter grade ', userValue:'65.4',
-            inputIndex:0, inputType:'deci' }
 
-        When in() is hit, the LAST output event is absorbed as the inline
-        prompt so the input box appears on the same line.
+        If user_inputs is empty/None we enter "scan mode": we execute normally
+        but stop as soon as we hit the FIRST input call, emitting just that
+        one input_prompt event so the frontend can display the first input box.
+        When user_inputs are provided we run fully and return all events.
         """
         self.output_lines = []
         self.events       = []
@@ -48,6 +47,7 @@ class TACInterpreter:
         self._input_types = get_input_types(tac_list)
         self._input_index = 0
         self._buf         = ""
+        self._scan_mode   = len(self._input_queue) == 0
 
         label_map = {ins.name: i for i, ins in enumerate(tac_list)
                      if isinstance(ins, TACLabel)}
@@ -63,26 +63,27 @@ class TACInterpreter:
             self._exec(tac_list, main_start, env, label_map, func_map, 0)
         except (_ProgramDone, _ReturnSignal):
             pass
+        except _ScanStop:
+            pass   # clean stop after collecting first prompt in scan mode
         except _IterLimit:
             self._out("[stopped: iteration limit]")
         except Exception as e:
-            self._out(f"[runtime error: {e}]")
+            self._flush_buf()
+            self.events.append({"type": "runtime_error", "text": str(e)})
 
-        self._flush_buf()  # flush any remaining buffered output
+        self._flush_buf()
         plain = "\n".join(self.output_lines) if self.output_lines else "(no output)"
         return plain, self.events
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _out(self, text):
-        """Emit a plain output event (flushing any buffered no-newline text first)."""
         combined = self._buf + text
         self._buf = ""
         self.output_lines.append(combined)
         self.events.append({"type": "output", "text": combined})
 
     def _flush_buf(self):
-        """Flush any remaining buffered text as a final output line."""
         if self._buf:
             self.output_lines.append(self._buf)
             self.events.append({"type": "output", "text": self._buf})
@@ -90,11 +91,9 @@ class TACInterpreter:
 
     def _absorb_prompt(self):
         """
-        Absorb the prompt text for an inline in() display.
-        Priority 1: buffered no-newline text (from no_nl segments).
-        Priority 2: the last completed output event — this covers the common
-                    pattern  out("enter: "); x = in();  where the prompt is
-                    a standalone out() call immediately before in().
+        Absorb the preceding output as the inline prompt text for an input box.
+        Priority 1: buffered no-newline text.
+        Priority 2: last completed output event.
         """
         if self._buf:
             prompt = self._buf
@@ -187,41 +186,70 @@ class TACInterpreter:
         args = [self._ev(a, cenv) for a in ins.args]
 
         if func in ("read_int","read_double","read_char","read_word","read_bool"):
-            # absorb the preceding out() line as the inline prompt
             prompt = self._absorb_prompt()
             idx    = self._input_index
             itype  = self._input_types[idx] if idx < len(self._input_types) else "word"
             self._input_index += 1
 
-            raw = self._input_queue.pop(0).strip() if self._input_queue else ""
+            # ── SCAN MODE: no real inputs yet ──────────────────────────────
+            # Emit the prompt event with empty userValue and NO error,
+            # then stop execution so the frontend shows just this first prompt.
+            if self._scan_mode:
+                self.events.append({
+                    "type": "input_prompt",
+                    "text": prompt,
+                    "userValue": "",
+                    "inputIndex": idx,
+                    "inputType": itype,
+                    "inputError": None,
+                })
+                self.output_lines.append(f"{prompt}")
+                raise _ScanStop()
 
-            # Convert Celerity ~ negative sign to Python -
+            # ── FULL RUN MODE ──────────────────────────────────────────────
+            # If the queue is empty, we've consumed all supplied inputs and the
+            # program needs one more.  Stop here and emit a pending prompt so
+            # the frontend can display the next input box.
+            if not self._input_queue:
+                self.events.append({
+                    "type": "input_prompt",
+                    "text": prompt,
+                    "userValue": "",
+                    "inputIndex": idx,
+                    "inputType": itype,
+                    "inputError": None,
+                })
+                self.output_lines.append(f"{prompt}")
+                raise _ScanStop()
+
+            raw = self._input_queue.pop(0).strip()
             parsed_raw = ("-" + raw[1:]) if raw.startswith("~") else raw
 
-            # Validate input type
+            # Validate — only when raw is non-empty
             error_msg = None
-            if func == "read_int":
-                if raw == "":
-                    error_msg = "Input required. Please enter a whole number (num)."
-                else:
+            if raw != "":
+                if func == "read_int":
                     try: int(float(parsed_raw))
-                    except: error_msg = f"Invalid input \'{raw}\'. Expected a whole number (num)."
-            elif func == "read_double":
-                if raw == "":
-                    error_msg = "Input required. Please enter a decimal number (deci)."
-                else:
+                    except: error_msg = f"Invalid input '{raw}'. Expected a whole number (num)."
+                    else:
+                        if "." in parsed_raw:
+                            error_msg = f"Invalid input '{raw}'. Expected a whole number (num)."
+                elif func == "read_double":
                     try: float(parsed_raw)
-                    except: error_msg = f"Invalid input \'{raw}\'. Expected a decimal number (deci)."
-            elif func == "read_bool":
-                if raw.lower() not in ("true","false","1","0","yes","no","y","n"):
-                    error_msg = f"Invalid input \'{raw}\'. Expected true or false (bool)."
-            elif func == "read_char":
-                if len(raw) != 1:
-                    error_msg = f"Invalid input \'{raw}\'. Expected a single character (single)."
+                    except: error_msg = f"Invalid input '{raw}'. Expected a decimal number (deci)."
+                elif func == "read_bool":
+                    if raw.lower() not in ("true","false","1","0","yes","no","y","n"):
+                        error_msg = f"Invalid input '{raw}'. Expected true or false (bool)."
+                elif func == "read_char":
+                    if len(raw) != 1:
+                        error_msg = f"Invalid input '{raw}'. Expected a single character (single)."
 
             self.events.append({
-                "type": "input_prompt", "text": prompt,
-                "userValue": raw, "inputIndex": idx, "inputType": itype,
+                "type": "input_prompt",
+                "text": prompt,
+                "userValue": raw,
+                "inputIndex": idx,
+                "inputType": itype,
                 "inputError": error_msg,
             })
             self.output_lines.append(f"{prompt}{raw}")
@@ -266,19 +294,16 @@ class TACInterpreter:
             s = str(val) if val is not None else ""
             text = s[1:-1] if len(s) >= 2 and s[0]=='"' and s[-1]=='"' else s
 
-        # Buffer everything. Only flush when \n is encountered.
-        # This means out("*") accumulates in _buf until out("\n") flushes it,
-        # giving correct behaviour for loops that print without newlines.
         if '\\n' in text or '\n' in text:
             parts = text.replace('\\n', '\n').split('\n')
             self._buf += parts[0]
-            self._flush_buf()          # flush the completed line
-            for part in parts[1:-1]:   # middle pieces each flush
+            self._flush_buf()
+            for part in parts[1:-1]:
                 self._buf += part
                 self._flush_buf()
-            self._buf += parts[-1]     # last piece stays buffered
+            self._buf += parts[-1]
         else:
-            self._buf += text          # no newline — keep buffering
+            self._buf += text
 
     def _ev(self, expr, env):
         if expr is None: return 0
@@ -332,7 +357,7 @@ class TACInterpreter:
             while len(obj)<=indices[0]: obj.append([])
             while len(obj[indices[0]])<=indices[1]: obj[indices[0]].append(0)
             obj[indices[0]][indices[1]] = val
-        env[base] = obj   # <-- ADD THIS LINE if missing
+        env[base] = obj
 
     def _binop(self, op, l, r):
         try:
@@ -358,3 +383,4 @@ class _ReturnSignal(Exception):
     def __init__(self, v): self.value = v
 class _IterLimit(Exception): pass
 class _ProgramDone(Exception): pass
+class _ScanStop(Exception): pass   # clean stop after first prompt in scan mode
