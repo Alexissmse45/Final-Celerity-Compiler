@@ -53,13 +53,13 @@ class Lexer:
         self.delim4 = {';', '('} | self.alphadigit | self.space 
         self.delim5 = {'~', '(', '+' , '-'} | self.digit | self.space
         self.delim6 = {'('} | self.alphadigit 
-        self.delim7 = {'~', '"', "'", '('} | self.alphadigit | self.space
+        self.delim7 = {'~', '"', "'", '(', ')'} | self.alphadigit | self.space
         self.delim8 = {'~', '"', '(' , '{'} | self.alphadigit | self.space
         self.delim9 = {'(', ')', '!', "'", '"'} | self.alphadigit | self.space
         self.delim10 = {'{', ')', '<', '>', '=', '|', '&', '+', '-', '/', '*', '%', '"'} | self.semicolon | self.space | self.newln | self.colon | self.comma
-        self.delim11 = {']'} | self.space | self.digit
-        self.delim12 = {'=', '[', ')'} | self.space | self.newln | self.semicolon
-        self.delim13 = {'{', "'", '"', '~'} | self.alphadigit | self.space | self.newln
+        self.delim11 = {']'} | self.space | self.digit | self.alphabet
+        self.delim12 = {'=', '[', ')', ','} | self.space | self.newln | self.semicolon
+        self.delim13 = {'{', "'", '"', '~'} | self.alphadigit | self.whitespace
 
         self.delim14 = {'}'} | self.semicolon | self.comma | self.alphabet | self.space | self.newln    
         self.delim15 = {'}', ')', ']'} | self.space | self.semicolon | self.comma | self.colon    
@@ -2048,7 +2048,7 @@ class Lexer:
                             state = 0 
                     
                 case 89: # 'return'
-                    if char in self.space or char == '\t':
+                    if char in self.space or char == '\t' or char == ';':
                         state = 90
                         if char is not None:
                             self.step_back()
