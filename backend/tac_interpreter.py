@@ -29,17 +29,9 @@ class TACInterpreter:
         self._input_types = []
         self._input_index = 0
         self._buf         = ""
-        self._scan_mode   = False   # True = initial scan (no real inputs yet)
+        self._scan_mode   = False
 
     def run(self, tac_list, user_inputs=None):
-        """
-        Execute TAC. Returns (plain_string, events).
-
-        If user_inputs is empty/None we enter "scan mode": we execute normally
-        but stop as soon as we hit the FIRST input call, emitting just that
-        one input_prompt event so the frontend can display the first input box.
-        When user_inputs are provided we run fully and return all events.
-        """
         self.output_lines = []
         self.events       = []
         self._iter        = 0
@@ -64,7 +56,7 @@ class TACInterpreter:
         except (_ProgramDone, _ReturnSignal):
             pass
         except _ScanStop:
-            pass   # clean stop after collecting first prompt in scan mode
+            pass
         except _IterLimit:
             self._out("[stopped: iteration limit]")
         except Exception as e:
@@ -90,11 +82,6 @@ class TACInterpreter:
             self._buf = ""
 
     def _absorb_prompt(self):
-        """
-        Absorb the preceding output as the inline prompt text for an input box.
-        Priority 1: buffered no-newline text.
-        Priority 2: last completed output event.
-        """
         if self._buf:
             prompt = self._buf
             self._buf = ""
@@ -109,8 +96,14 @@ class TACInterpreter:
 
     # ── executor ──────────────────────────────────────────────────────────────
 
-    def _exec(self, tac, start, env, lmap, fmap, depth):
+    def _exec(self, tac, start, env, lmap, fmap, depth, skip_decl=None):
+        """
+        skip_decl: set of variable names bound by argument passing.
+        TACDeclare / TACArrayDeclare for these names are skipped so
+        passed values are not overwritten by default initialisers.
+        """
         if depth > 200: raise RecursionError("call depth exceeded")
+        _skip = skip_decl or set()
         pc = start
         while pc < len(tac):
             self._iter += 1
@@ -122,17 +115,19 @@ class TACInterpreter:
             if isinstance(ins, (TACStructDef, TACFuncBegin)): pc+=1; continue
 
             if isinstance(ins, TACDeclare):
-                env[ins.name] = self._ev(ins.init, env) if ins.init is not None else self._zero(ins.c_type)
+                if ins.name not in _skip:
+                    env[ins.name] = self._ev(ins.init, env) if ins.init is not None else self._zero(ins.c_type)
                 pc+=1; continue
 
             if isinstance(ins, TACArrayDeclare):
-                if ins.init:
-                    if isinstance(ins.init[0], list):
-                        env[ins.name] = [[self._ev(v,env) for v in row] for row in ins.init]
+                if ins.name not in _skip:
+                    if ins.init:
+                        if isinstance(ins.init[0], list):
+                            env[ins.name] = [[self._ev(v,env) for v in row] for row in ins.init]
+                        else:
+                            env[ins.name] = [self._ev(v,env) for v in ins.init]
                     else:
-                        env[ins.name] = [self._ev(v,env) for v in ins.init]
-                else:
-                    env[ins.name] = []
+                        env[ins.name] = []
                 pc+=1; continue
 
             if isinstance(ins, TACAssign):
@@ -191,33 +186,20 @@ class TACInterpreter:
             itype  = self._input_types[idx] if idx < len(self._input_types) else "word"
             self._input_index += 1
 
-            # ── SCAN MODE: no real inputs yet ──────────────────────────────
-            # Emit the prompt event with empty userValue and NO error,
-            # then stop execution so the frontend shows just this first prompt.
             if self._scan_mode:
                 self.events.append({
-                    "type": "input_prompt",
-                    "text": prompt,
-                    "userValue": "",
-                    "inputIndex": idx,
-                    "inputType": itype,
-                    "inputError": None,
+                    "type": "input_prompt", "text": prompt,
+                    "userValue": "", "inputIndex": idx,
+                    "inputType": itype, "inputError": None,
                 })
                 self.output_lines.append(f"{prompt}")
                 raise _ScanStop()
 
-            # ── FULL RUN MODE ──────────────────────────────────────────────
-            # If the queue is empty, we've consumed all supplied inputs and the
-            # program needs one more.  Stop here and emit a pending prompt so
-            # the frontend can display the next input box.
             if not self._input_queue:
                 self.events.append({
-                    "type": "input_prompt",
-                    "text": prompt,
-                    "userValue": "",
-                    "inputIndex": idx,
-                    "inputType": itype,
-                    "inputError": None,
+                    "type": "input_prompt", "text": prompt,
+                    "userValue": "", "inputIndex": idx,
+                    "inputType": itype, "inputError": None,
                 })
                 self.output_lines.append(f"{prompt}")
                 raise _ScanStop()
@@ -225,7 +207,6 @@ class TACInterpreter:
             raw = self._input_queue.pop(0).strip()
             parsed_raw = ("-" + raw[1:]) if raw.startswith("~") else raw
 
-            # Validate — only when raw is non-empty
             error_msg = None
             if raw != "":
                 if func == "read_int":
@@ -245,20 +226,15 @@ class TACInterpreter:
                         error_msg = f"Invalid input '{raw}'. Expected a single character (single)."
 
             self.events.append({
-                "type": "input_prompt",
-                "text": prompt,
-                "userValue": raw,
-                "inputIndex": idx,
-                "inputType": itype,
-                "inputError": error_msg,
+                "type": "input_prompt", "text": prompt,
+                "userValue": raw, "inputIndex": idx,
+                "inputType": itype, "inputError": error_msg,
             })
             self.output_lines.append(f"{prompt}{raw}")
 
             if error_msg:
                 self.events.append({
-                    "type": "input_error",
-                    "text": error_msg,
-                    "inputIndex": idx,
+                    "type": "input_error", "text": error_msg, "inputIndex": idx,
                 })
 
             if func == "read_int":
@@ -271,12 +247,33 @@ class TACInterpreter:
             if func == "read_word":   return raw
             if func == "read_bool":   return raw.lower() in ("true","1","yes","y")
 
+        # ── built-in functions ────────────────────────────────────────────
+        if func == "len":
+            s = args[0] if args else ""
+            if isinstance(s, str):
+                return len(s)
+            elif isinstance(s, list):
+                return len(s)
+            return 0
+
         if func in fmap:
             fb = tac[fmap[func]]
+            param_names = {p.split()[-1] for p in fb.params}
+
+            # Start with caller's env so globals are accessible inside the function
             lenv = dict(cenv)
-            for p, v in zip(fb.params, args): lenv[p.split()[-1]] = v
-            try: self._exec(tac, fmap[func]+1, lenv, lmap, fmap, depth+1)
-            except _ReturnSignal as r: return r.value
+            for p, v in zip(fb.params, args):
+                lenv[p.split()[-1]] = v
+
+            try:
+                self._exec(tac, fmap[func]+1, lenv, lmap, fmap, depth+1,
+                           skip_decl=param_names)
+            except _ReturnSignal as r:
+                cenv.update(lenv)
+                return r.value
+
+            # Write all changes back after normal completion
+            cenv.update(lenv)
         return None
 
     def _print(self, ins, env):
@@ -291,7 +288,10 @@ class TACInterpreter:
             except: text = str(val)
         elif fmt == "%c":  text = str(val)
         else:
-            s = str(val) if val is not None else ""
+            if isinstance(val, list):
+                s = "".join(str(c) for c in val)
+            else:
+                s = str(val) if val is not None else ""
             text = s[1:-1] if len(s) >= 2 and s[0]=='"' and s[-1]=='"' else s
 
         if '\\n' in text or '\n' in text:
@@ -326,7 +326,12 @@ class TACInterpreter:
                 rest = rest[c+1:]
             obj = env.get(base, [])
             for i in indices:
-                obj = obj[i] if isinstance(obj,list) and 0<=i<len(obj) else 0
+                if isinstance(obj, list) and 0 <= i < len(obj):
+                    obj = obj[i]
+                elif isinstance(obj, str) and 0 <= i < len(obj):
+                    obj = obj[i]
+                else:
+                    obj = 0
             return obj
         if "." in expr:
             p = expr.split(".", 1)
@@ -350,6 +355,11 @@ class TACInterpreter:
             indices.append(int(self._ev(rest[1:c], env)))
             rest = rest[c+1:]
         obj = env.get(base, [])
+
+        # strings are immutable in Python — convert to char list for mutation
+        if isinstance(obj, str):
+            obj = list(obj)
+
         if len(indices)==1:
             while len(obj)<=indices[0]: obj.append(0)
             obj[indices[0]] = val
@@ -383,4 +393,4 @@ class _ReturnSignal(Exception):
     def __init__(self, v): self.value = v
 class _IterLimit(Exception): pass
 class _ProgramDone(Exception): pass
-class _ScanStop(Exception): pass   # clean stop after first prompt in scan mode
+class _ScanStop(Exception): pass
