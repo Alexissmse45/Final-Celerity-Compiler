@@ -145,15 +145,18 @@ class CodeGenerator:
         self.struct_defs  = {}
         self._temp_n      = 0
         self._label_n     = 0
+        # tracks which params are arrays: func_name -> {param_name -> True}
+        self._array_params = {}
 
     def generate(self, tokens):
-        self.tokens    = tokens
-        self.pos       = 0
-        self.tac       = []
-        self.var_types = {"global": {}}
-        self.scope     = "global"
-        self._temp_n   = 0
-        self._label_n  = 0
+        self.tokens       = tokens
+        self.pos          = 0
+        self.tac          = []
+        self.var_types    = {"global": {}}
+        self.scope        = "global"
+        self._temp_n      = 0
+        self._label_n     = 0
+        self._array_params = {}
         self._parse_program()
         user_lines   = self._emit_c()
         helper_lines = self._helpers()
@@ -212,7 +215,7 @@ class CodeGenerator:
             if t == "struct":
                 if self._lex(2) == "{": self._parse_struct_def()
                 else:                   self._parse_struct_var()
-            elif t == "const":                           self._parse_const()
+            elif t == "const":                               self._parse_const()
             elif t in ("num","deci","word","single","bool"): self._parse_var_decl()
             elif t in ("function","vacant","main"):          self._parse_function()
             else: self._eat()
@@ -267,7 +270,7 @@ class CodeGenerator:
             self._reg(name, lang)
             if self._lex() == "[":
                 self._parse_array_decl(lang, ctype, name)
-                break  # _parse_array_decl consumes everything including ";"
+                break
             elif self._lex() == "=":
                 self._eat()
                 if self._typ() == "in":
@@ -292,7 +295,7 @@ class CodeGenerator:
             self._eat()
             dims.append(size)
         init = None
-        if self._lex() == "=":          # <-- fixed: no extra check for "{"
+        if self._lex() == "=":
             self._eat()
             if self._lex() == "{": init = self._parse_array_init(dims)
         if init is None:
@@ -347,21 +350,39 @@ class CodeGenerator:
         self.scope  = func_name
         if func_name not in self.var_types:
             self.var_types[func_name] = {}
+        if func_name not in self._array_params:
+            self._array_params[func_name] = set()
 
-        self._eat()
+        self._eat()   # consume '('
         params = []
         while self._lex() != ")":
             if self._lex() == ",": self._eat(); continue
-            p_lang  = self._eat()[0]
-            p_name  = self._eat()[0]
-            params.append(f"{self._ctype(p_lang)} {p_name}")
+            p_lang = self._eat()[0]
+            p_name = self._eat()[0]
             self._reg(p_name, p_lang)
-        self._eat()
+
+            # ── KEY FIX: consume any [size] brackets on array parameters ──
+            # e.g.  num arr[10]  has an extra [10] that must be eaten here
+            # so it is not mistaken for a statement inside the function body.
+            is_array_param = False
+            while self._lex() == "[":
+                is_array_param = True
+                self._eat()                      # eat '['
+                while self._lex() != "]": self._eat()   # eat size tokens
+                self._eat()                      # eat ']'
+
+            if is_array_param:
+                self._array_params[func_name].add(p_name)
+                params.append(f"{self._ctype(p_lang)}* {p_name}")
+            else:
+                params.append(f"{self._ctype(p_lang)} {p_name}")
+
+        self._eat()   # consume ')'
 
         self.tac.append(TACFuncBegin(ret_type, func_name, params))
 
         while self._lex() != "{": self._eat()
-        self._eat()
+        self._eat()   # consume '{'
 
         depth = 1
         while self.pos < len(self.tokens) and depth > 0:
@@ -371,7 +392,7 @@ class CodeGenerator:
                 if depth == 0: break
             self._parse_stmt()
 
-        self._eat()
+        self._eat()   # consume '}'
 
         if func_name == "main": self.tac.append(TACReturn("0"))
         self.tac.append(TACFuncEnd(func_name))
