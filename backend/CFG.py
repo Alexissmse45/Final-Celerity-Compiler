@@ -108,10 +108,14 @@ cfg = {
         ["λ"]],
 
     "<parameter_set>": [
-        ["<data_type>", "identifier", "<parameter_after>"]],
+    ["<data_type>", "identifier", "<param_array>", "<parameter_after>"]],
+
+    "<param_array>": [
+        ["[", "<size>", "]"],
+        ["λ"]],
 
     "<parameter_after>": [
-        [",", "<data_type>", "identifier", "<parameter_after>"],
+        [",", "<data_type>", "identifier", "<param_array>", "<parameter_after>"],
         ["λ"]],
 
     "<local_dec>": [
@@ -180,9 +184,10 @@ cfg = {
         ["<expression_op>", "<expression_operand>", "<expression_after>"],
         ["λ"]],
 
-    "<expression_operand>": [["<value>"],
-                             ["(", "<expression>", ")"],
-                             ["!", "(", "<expression>", ")"]],
+    "<expression_operand>": [
+        ["<value>"],
+        ["(", "<expression>", ")"],
+        ["!", "(", "<expression>", ")"]],
 
     "<expression_op>": [
         ["+"],
