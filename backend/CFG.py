@@ -108,14 +108,14 @@ cfg = {
         ["λ"]],
 
     "<parameter_set>": [
-    ["<data_type>", "identifier", "<param_array>", "<parameter_after>"]],
-
-    "<param_array>": [
-        ["[", "<size>", "]"],
-        ["λ"]],
+        ["<data_type>", "identifier", "<param_array>", "<parameter_after>"]],
 
     "<parameter_after>": [
         [",", "<data_type>", "identifier", "<param_array>", "<parameter_after>"],
+        ["λ"]],
+    
+    "<param_array>": [
+        ["[", "<size>", "]"],
         ["λ"]],
 
     "<local_dec>": [
@@ -128,7 +128,7 @@ cfg = {
         ["const", "<data_type>", "identifier", "=", "<literal>", "<const_after>"],
         ["struct", "identifier", "<struct_after>"]],
 
-    "<statement_set>": [
+    "<statement_set>": [#
         ["<statement_after>", "<statement_set>"],
         ["λ"]],
 
@@ -189,7 +189,7 @@ cfg = {
         ["(", "<expression>", ")"],
         ["!", "(", "<expression>", ")"]],
 
-    "<expression_op>": [
+    "<expression_op>": [#76
         ["+"],
         ["-"],
         ["*"],
@@ -255,7 +255,7 @@ cfg = {
         ["match", "(", "identifier", ")", "{", "<pick>", "def", ":", "<statement_set>", "}"]],
 
     "<pick>": [
-        ["pick", "<pattern>", ":", "<pick_statement_set>", "split", ";", "<pick>"],
+        ["pick", "<pattern>", ":", "<pick_statement_set>", "<split>", ";", "<pick>"],
         ["λ"]],
 
     "<pick_statement_set>": [
@@ -265,6 +265,10 @@ cfg = {
     "<pattern>": [
         ["identifier"],
         ["<literal>"]],
+
+    "<split>": [
+        ["split"],
+        ["λ"]],
 
     "<loop_statement>": [
         ["for", "(", "identifier", "=", "<arithmetic_expression>", ";", "<condition>", ";", "<incre_decre_option>", ")", "{", "<statement_set>", "}"],
@@ -316,7 +320,6 @@ cfg = {
     "<return_value>": [
         ["<arithmetic_expression>"],
         ["λ"]],
-
 }
 
 def compute_first_set(cfg):
@@ -530,3 +533,44 @@ class LL1Parser:
             print("\n⚠️ Syntax Errors:")
             for error in self.errors:
                 print(error)
+
+# print("========== FIRST SETS ==========")
+# for non_terminal, symbols in first_set.items():
+#     print(f"{symbols}")
+
+# print("\n========== FOLLOW SETS ==========")
+# for non_terminal, symbols in follow_set.items():
+#     print(f"{symbols}")
+
+# print("\n========== PREDICT SETS ==========")
+# for non_terminal, symbols in predict_set.items():
+#     print(f"{symbols}")
+
+# --- AMBIGUITY CHECK (LL(1) CONFLICT DETECTION) ---
+
+print("\n========== AMBIGUITY CHECK ==========")
+conflicts_found = False
+parse_table_conflicts = {}
+
+for non_terminal, productions in cfg.items():
+    entry_map = {}
+    for production in productions:
+        key = (non_terminal, tuple(production))
+        predict_symbols = predict_set[key]
+        for terminal in predict_symbols:
+            if terminal in entry_map:
+                conflicts_found = True
+                if (non_terminal, terminal) not in parse_table_conflicts:
+                    parse_table_conflicts[(non_terminal, terminal)] = []
+                parse_table_conflicts[(non_terminal, terminal)].append(production)
+            else:
+                entry_map[terminal] = production
+
+if conflicts_found:
+    print("⚠️ Grammar is NOT LL(1) — Conflicts detected!\n")
+    for (non_terminal, terminal), prods in parse_table_conflicts.items():
+        print(f"Conflict at {non_terminal} for terminal '{terminal}':")
+        for prod in prods:
+            print(f"   → {prod}")
+else:
+    print("✅ Grammar is LL(1) — No conflicts found.")
