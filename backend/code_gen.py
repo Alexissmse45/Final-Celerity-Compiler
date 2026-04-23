@@ -137,25 +137,24 @@ class CodeGenerator:
     }
 
     def __init__(self):
-        self.tac          = []
-        self.tokens       = []
-        self.pos          = 0
-        self.var_types    = {"global": {}}
-        self.scope        = "global"
-        self.struct_defs  = {}
-        self._temp_n      = 0
-        self._label_n     = 0
-        # tracks which params are arrays: func_name -> {param_name -> True}
+        self.tac           = []
+        self.tokens        = []
+        self.pos           = 0
+        self.var_types     = {"global": {}}
+        self.scope         = "global"
+        self.struct_defs   = {}
+        self._temp_n       = 0
+        self._label_n      = 0
         self._array_params = {}
 
     def generate(self, tokens):
-        self.tokens       = tokens
-        self.pos          = 0
-        self.tac          = []
-        self.var_types    = {"global": {}}
-        self.scope        = "global"
-        self._temp_n      = 0
-        self._label_n     = 0
+        self.tokens        = tokens
+        self.pos           = 0
+        self.tac           = []
+        self.var_types     = {"global": {}}
+        self.scope         = "global"
+        self._temp_n       = 0
+        self._label_n      = 0
         self._array_params = {}
         self._parse_program()
         user_lines   = self._emit_c()
@@ -299,13 +298,7 @@ class CodeGenerator:
             self._eat()
             if self._lex() == "{": init = self._parse_array_init(dims)
         if init is None:
-            dv = self._default(lang)
-            if len(dims)==1 and dims[0].isdigit():
-                init = [dv]*int(dims[0])
-            elif len(dims)==2 and dims[0].isdigit() and dims[1].isdigit():
-                init = [[dv]*int(dims[1]) for _ in range(int(dims[0]))]
-            else:
-                init = [dv]
+            init = []   # empty — grows dynamically in interpreter
         self.tac.append(TACArrayDeclare(ctype, name, dims, init))
         if self._lex() == ";": self._eat()
 
@@ -360,17 +353,12 @@ class CodeGenerator:
             p_lang = self._eat()[0]
             p_name = self._eat()[0]
             self._reg(p_name, p_lang)
-
-            # ── KEY FIX: consume any [size] brackets on array parameters ──
-            # e.g.  num arr[10]  has an extra [10] that must be eaten here
-            # so it is not mistaken for a statement inside the function body.
             is_array_param = False
             while self._lex() == "[":
                 is_array_param = True
-                self._eat()                      # eat '['
-                while self._lex() != "]": self._eat()   # eat size tokens
-                self._eat()                      # eat ']'
-
+                self._eat()
+                while self._lex() != "]": self._eat()
+                self._eat()
             if is_array_param:
                 self._array_params[func_name].add(p_name)
                 params.append(f"{self._ctype(p_lang)}* {p_name}")
@@ -378,7 +366,6 @@ class CodeGenerator:
                 params.append(f"{self._ctype(p_lang)} {p_name}")
 
         self._eat()   # consume ')'
-
         self.tac.append(TACFuncBegin(ret_type, func_name, params))
 
         while self._lex() != "{": self._eat()
@@ -393,7 +380,6 @@ class CodeGenerator:
             self._parse_stmt()
 
         self._eat()   # consume '}'
-
         if func_name == "main": self.tac.append(TACReturn("0"))
         self.tac.append(TACFuncEnd(func_name))
         self.scope = prev_scope
@@ -424,12 +410,14 @@ class CodeGenerator:
         name = self._eat()[0]
         ASSIGN_OPS = {"=","+=","-=","*=","/=","%=","**="}
 
+        # ---- post increment/decrement: name++ or name-- ----
         if self._lex() in ("++","--"):
             op = self._eat()[0]
             self.tac.append(TACUnary(name, op, None, post=True))
             if self._lex() == ";": self._eat()
             return
 
+        # ---- function call: name(...) ----
         if self._lex() == "(":
             self._eat()
             args = self._parse_arg_list()
@@ -438,13 +426,14 @@ class CodeGenerator:
             if self._lex() == ";": self._eat()
             return
 
+        # ---- array assignment: name[idx] = expr ----
         if self._lex() == "[":
             indices = []
             while self._lex() == "[":
                 self._eat(); idx = self._parse_expr(); indices.append(idx); self._eat()
+            lang = self._type_of(name) or "num"   # resolve type BEFORE eating operator
             op   = self._eat()[0]
             lhs  = name + "".join(f"[{i}]" for i in indices)
-            lang = self._type_of(name) or "num"
             if self._typ() == "in":
                 self._eat(); self._eat(); self._eat()
                 tmp = self._tmp()
@@ -456,6 +445,7 @@ class CodeGenerator:
             if self._lex() == ";": self._eat()
             return
 
+        # ---- struct field assignment: name.field = expr ----
         if self._lex() == ".":
             self._eat(); field = self._eat()[0]; op = self._eat()[0]
             var_lang    = self._type_of(name) or ""
@@ -473,6 +463,7 @@ class CodeGenerator:
             if self._lex() == ";": self._eat()
             return
 
+        # ---- simple assignment: name = expr ----
         if self._lex() in ASSIGN_OPS:
             op   = self._eat()[0]
             lang = self._type_of(name) or "num"
@@ -487,6 +478,7 @@ class CodeGenerator:
             if self._lex() == ";": self._eat()
             return
 
+        # ---- fallback: skip to semicolon ----
         while self._lex() not in (";", None): self._eat()
         if self._lex() == ";": self._eat()
 
