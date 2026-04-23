@@ -14,9 +14,10 @@ def count_inputs(tac_list):
 def get_input_types(tac_list):
     READ_TYPE = {"read_int":"num","read_double":"deci","read_char":"single",
                  "read_word":"word","read_bool":"bool"}
-    return [READ_TYPE.get(i.func,"word") for i in tac_list
-            if isinstance(i, TACCall) and i.func in READ_TYPE]
-
+    result = [READ_TYPE.get(i.func,"word") for i in tac_list
+              if isinstance(i, TACCall) and i.func in READ_TYPE]
+    print("DEBUG input types:", result)  # ← add this
+    return result
 
 class TACInterpreter:
     MAX_ITER = 200_000
