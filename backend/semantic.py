@@ -35,7 +35,7 @@ class Semantic:
             "single": ["single_literal"],
             "word":   ["word_literal"],
         }
-
+        
     # ------------------------------------------------------------------ #
     #  Main entry point
     # ------------------------------------------------------------------ #
@@ -44,8 +44,35 @@ class Semantic:
         self.index = 0
         self.data_types = {"num", "deci", "bool", "single", "word"}
 
-        if self.current_scope not in self.symbol_table: #If this scope is not yet in the symbol table, create it
+        if self.current_scope not in self.symbol_table:
             self.symbol_table[self.current_scope] = {}
+
+        # Built-in functions
+        self.symbol_table["global"]["len"] = Symbol(
+            name="len", symbol_type="function",
+            data_type="num", value=[("s", "word")],
+            line=0, column=0
+        )
+        # Pre-register all functions for forward references and recursion
+        i = 0
+        while i < len(tokens):
+            lex, tok, line, col = tokens[i]
+            if tok in ("function", "vacant", "main"):
+                if tok == "main":
+                    fname = "main"
+                    ret = "vacant"
+                else:
+                    fname = tokens[i+1][0] if i+1 < len(tokens) else None
+                    ret = "num" if tok == "function" else "vacant"
+                if fname and fname not in self.symbol_table.get("global", {}):
+                    self.symbol_table["global"][fname] = Symbol(
+                        name=fname, symbol_type="function",
+                        data_type=ret, value=[],
+                        line=line, column=col
+                    )
+                    if fname not in self.symbol_table:
+                        self.symbol_table[fname] = {}
+            i += 1
 
         while self.index < len(self.tokens):
             lexeme, token_type, line, column = self.tokens[self.index]
@@ -82,8 +109,10 @@ class Semantic:
         return (None, None, -1, 0) # If idx is NOT valid (too big), Instead of crashing, it returns:
 
     def is_duplicate_variable(self, var_name, line, column):
-        if (var_name in self.symbol_table.get(self.current_scope, {}) or
-                var_name in self.symbol_table.get("global", {})):
+        in_current = var_name in self.symbol_table.get(self.current_scope, {})
+        global_sym = self.symbol_table.get("global", {}).get(var_name)
+        global_is_func = global_sym and global_sym.symbol_type == "function"
+        if in_current or (global_sym and not global_is_func):
             self.errors.append(
                 f"⚠️ Semantic Error at (line {line}, column {column}): "
                 f"Variable '{var_name}' is already declared."
@@ -464,7 +493,12 @@ class Semantic:
         self.index += 1  # past 'function' / 'vacant' / 'main'
         function_name, token_type, line, column = self.tokens[self.index]
 
-        if function_name in self.symbol_table.get("global", {}):
+        already_registered = (
+            function_name in self.symbol_table.get("global", {}) and
+            self.symbol_table["global"][function_name].symbol_type == "function" and
+            self.symbol_table["global"][function_name].value == []
+        )
+        if function_name in self.symbol_table.get("global", {}) and not already_registered:
             self.errors.append(
                 f"⚠️ Semantic Error at (line {line}, column {column}): "
                 f"'{function_name}' is already declared."
@@ -483,17 +517,30 @@ class Semantic:
             param_type_lex, param_type_tok, line, column = self.tokens[self.index]
             self.index += 1  # to param name
             param_name, _, line, column = self.tokens[self.index]
+            self.index += 1  # past param name
+
+            # Handle array parameter: num arr[10]
+            param_dimension = 0
+            param_sizes = []
+            while self.index < len(self.tokens) and self.tokens[self.index][0] == "[":
+                self.index += 1  # past '['
+                param_dimension += 1
+                if self.tokens[self.index][1] in ("num_literal", "identifier"):
+                    param_sizes.append(self.tokens[self.index][0])
+                    self.index += 1
+                self.index += 1  # past ']'
 
             self.symbol_table[function_name][param_name] = Symbol(
                 name=param_name,
                 symbol_type="parameter",
                 data_type=param_type_lex,
                 line=line,
-                column=column
+                column=column,
+                dimension=param_dimension,
+                sizes=param_sizes if param_sizes else None
             )
             parameters.append((param_name, param_type_lex))
 
-            self.index += 1  # to ',' or ')'
             if self.tokens[self.index][0] == ",":
                 self.index += 1
 
@@ -589,15 +636,30 @@ class Semantic:
                         return
 
                 elif token_type == "out":
-                    # out( expr ) — delegate entirely to validate_expression()
-                    # which correctly handles: identifiers, struct fields (s.x),
-                    # arrays, function calls, string/arithmetic expressions.
+                    # out( expr + expr ... )
                     self.index += 1  # past 'out'
-                    self.index += 1  # past '('
-                    self.validate_expression(entered_param=True)
-                    # validate_expression breaks cleanly at ')'; consume it
-                    if self.index < len(self.tokens) and self.tokens[self.index][0] == ")":
-                        self.index += 1  # past ')'
+                    while token_type != ")":
+                        self.index += 1
+                        lexeme2, token_type, line2, column2 = self.tokens[self.index]
+                        if token_type == "identifier":
+                            if not self._resolve_identifier(lexeme2, line2, column2):
+                                pass
+                            else:
+                                symbol = self._lookup(lexeme2)
+                                if symbol and symbol.dimension > 0:
+                                    if self.tokens[self.index + 1][0] == "[":
+                                        self.index += 2
+                                        idx_type = self.validate_expression()
+                                        if idx_type != "num_literal":
+                                            self.errors.append(
+                                                f"⚠️ Semantic Error at (line {line2}, column {column2}): "
+                                                f"Array index must be an integer"
+                                            )
+                                    else:
+                                        self.errors.append(
+                                            f"⚠️ Semantic Error at (line {line2}, column {column2}): "
+                                            f"Array variable '{lexeme2}' must have index"
+                                        )
 
                 elif token_type == "return":
                     self.index += 1
@@ -750,7 +812,6 @@ class Semantic:
 
         else:
             target_type = symbol.data_type
-            self.index += 1  # advance past identifier to reach '=' or operator
 
         # ---- assignment ----
         if symbol.symbol_type != "function":
@@ -807,6 +868,10 @@ class Semantic:
             "num": "num_literal", "deci": "deci_literal",
             "bool": "bool", "single": "single_literal", "word": "word_literal"
         }
+        # Skip check for pre-registered stubs (recursion/forward refs)
+        sym = self._lookup(func_name)
+        if sym and sym.symbol_type == "function" and sym.value == [] and len(received) > 0:
+            return
         if len(received) != len(expected):
             self.errors.append(
                 f"⚠️ Semantic Error at (line {line}, column {column}): "
@@ -815,15 +880,19 @@ class Semantic:
             )
             return
         numeric_types = ["num_literal", "deci_literal", "bool"]
+        word_types = ["word_literal", "word"]
+        single_types = ["single_literal", "single"]
         for i, ((ename, etype), rtype) in enumerate(zip(expected, received)):
             expected_mapped = type_mapping.get(etype, etype)
             if expected_mapped != rtype and rtype != "user_input":
                 if not (expected_mapped in numeric_types and rtype in numeric_types):
-                    self.errors.append(
-                        f"⚠️ Semantic Error at (line {line}, column {column}): "
-                        f"Argument type mismatch in '{func_name}' at position {i+1}: "
-                        f"Expected '{etype}', got '{rtype}'."
-                    )
+                    if not (expected_mapped in word_types and rtype in word_types):
+                        if not (expected_mapped in single_types and rtype in single_types):
+                            self.errors.append(
+                                f"⚠️ Semantic Error at (line {line}, column {column}): "
+                                f"Argument type mismatch in '{func_name}' at position {i+1}: "
+                                f"Expected '{etype}', got '{rtype}'."
+                            )
 
     # ------------------------------------------------------------------ #
     #  Expression validator  (operator-precedence / shunting-yard)
@@ -861,13 +930,6 @@ class Semantic:
                 ("bool", "deci_literal"): "num_literal",
                 ("deci_literal", "bool"): "num_literal",
                 ("word_literal", "word_literal"): "word_literal",
-                ("word_literal", "num_literal"): "word_literal",
-                ("word_literal", "deci_literal"): "word_literal",
-                ("word_literal", "bool"): "word_literal",
-                ("num_literal", "word_literal"): "word_literal",
-                ("deci_literal", "word_literal"): "word_literal",
-                ("bool", "word_literal"): "word_literal",
-                ("word_literal", "user_input"): "word_literal",
                 ("user_input", "num_literal"): "num_literal",
                 ("num_literal", "user_input"): "num_literal",
                 ("user_input", "deci_literal"): "deci_literal",
@@ -911,12 +973,15 @@ class Semantic:
                     return "error"
                 if op in ("==", "!="):
                     all_types = {"num_literal", "deci_literal", "bool",
-                                 "user_input", "word_literal", "single_literal"}
+                                "user_input", "word_literal", "single_literal"}
                     if left == right or (left in all_types and right in all_types):
+                        return "bool"
+                    # allow word variable compared to word_literal
+                    if left == "word_literal" and right == "word_literal":
                         return "bool"
                     return "error"
                 if op in ("<", ">", "<=", ">="):
-                    numeric = {"num_literal", "deci_literal", "bool", "user_input"}
+                    numeric = {"num_literal", "deci_literal", "bool", "user_input", "single_literal", }
                     if left in numeric and right in numeric:
                         return "bool"
                     return "error"
@@ -1005,6 +1070,12 @@ class Semantic:
 
                 if symbol.dimension > 0 or symbol.data_type == "word":
                     self.index += 1
+                    # Allow passing whole array as function argument (no index needed)
+                    if (self.index < len(self.tokens) and
+                            self.tokens[self.index][0] != "[" and
+                            symbol.dimension > 0 and entered_param):
+                        operand_stack.append(type_mapping.get(symbol.data_type, symbol.data_type))
+                        continue
                     if self.index < len(self.tokens) and self.tokens[self.index][0] == "[":
                         self.index += 1
                         idx_type = self.validate_expression()
@@ -1021,19 +1092,15 @@ class Semantic:
                                 return "error"
                             if self.index < len(self.tokens) and self.tokens[self.index][0] == "]":
                                 self.index += 1
-                        if symbol.data_type == "word" and symbol.dimension == 0:
-                            # Indexing a plain word variable (string) gives a character
+                        if symbol.data_type == "word":
                             operand_stack.append("single_literal")
-                        elif symbol.data_type == "word":
-                            # Indexing a word array gives a full word element
-                            operand_stack.append("word_literal")
                         else:
                             operand_stack.append(type_mapping.get(symbol.data_type, symbol.data_type))
                     else:
                         if symbol.dimension > 0:
                             self.errors.append(f"⚠️ Semantic Error at (line {line}, column {column}): Array variable '{lexeme}' must have index")
                             return "error"
-                        operand_stack.append(symbol.data_type)
+                        operand_stack.append(type_mapping.get(symbol.data_type, symbol.data_type))
 
                 elif symbol.symbol_type == "function":
                     self.index += 1
