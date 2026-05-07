@@ -67,27 +67,24 @@ class Lexer:
         self.delim17 = self.asciisingle | self.escapeseq | self.space
         
       
-    def fetch_next_char(self):
+    def fetch_next_char(self): #fetch lang nya yung char then increment position
         if self.position < len(self.source_code):
             char = self.source_code[self.position]
-            print(f"Fetching char at pos {self.position}: {repr(char)}")  # debug print
+            #print(f"Fetching char at pos {self.position}: {repr(char)}")  # debug print
             self.position += 1 # Move to next position
             return char
         return None # End of file reached
 
-    def peek(self): # Looks at the next character without consuming it.
+    def peek(self): # Looks at the next character without consuming it. bali chinececk lang niya kung kumpleto na yung token
         if self.position < len(self.source_code): 
             return self.source_code[self.position]
         return None
 
     def step_back(self):
-        """
-        Moves the position pointer back by one character.
-        Used when a delimiter is encountered that belongs to the next token.
-        """
+        #Moves the position pointer back by one character.Used when a delimiter is encountered that belongs to the next token.
         if self.position > 0:
             self.position -= 1
-                # For simplicity, we won't update line and column on rewind in this example.
+                # hell; = pos4 pero pag ginamit magiging pos3, magkaiba kasi ng delim yung iden at ;
 
     def lexeme(self, code):
         self.source_code = code  # Store the source code to analyze
@@ -111,7 +108,7 @@ class Lexer:
 
             match state: 
                 case 0: # Initial/reset state - starting point for each new token
-                    lexeme = ""  # Clear the current lexeme
+                    lexeme = ""  # pang reset lang 
 
                     #spaces 
                     if char in self.whitespace: 
@@ -123,7 +120,7 @@ class Lexer:
                     # single-character tokens / galing sa state 0
                     elif char == 'b': # Could be 'bool' keyword
                         state = 1
-                        lexeme += char
+                        lexeme += char #storing and nag dadagdag habang nag ttype
                     elif char == 'c': # Could be 'const' keyword
                         state = 6
                         lexeme += 'c'
@@ -285,8 +282,7 @@ class Lexer:
                         lexeme += char
                     elif char is not None and (char.isalpha() or char.isdigit() or char == '_'):
                         # Not 'bool', treat as identifier
-                        state = 252
-                        
+                        state = 252          
                         lexeme += char
                     else:# Invalid delimiter after 'b'
                         if char in self.delimiden:
