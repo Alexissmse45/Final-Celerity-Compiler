@@ -1,4 +1,4 @@
-1. SQURARE ROOT CALCULATOR
+1. SQURARE ROOT CALCULATOR===========
 function sqrt(deci n){
   deci guess;
   deci better;
@@ -20,7 +20,7 @@ main(){
   out("Square root of " + n + " = " + result);
 }
 
-2. SUM OF SQUARES CALCULATOR
+2. SUM OF SQUARES CALCULATOR===========
 function sumSquares(num n){
   num i;
   num total;
@@ -40,7 +40,7 @@ main(){
   out("Sum of squares from 1 to " + n + " = " + result);
 } 
 
-3. SUM OF CUBES CALCULATOR
+3. SUM OF CUBES CALCULATOR===========
 function sumCubes(num n){
   num i;
   num total;
@@ -60,7 +60,7 @@ main(){
   out("Sum of cubes from 1 to " + n + " = " + result);
 } 
 
-4. NUMBER CONVERSION CALCULATOR
+4. NUMBER CONVERSION CALCULATOR===========
 function binToDec(num b){
   num dec;
   num place;
@@ -173,7 +173,7 @@ main(){
   }
 } 
 
-5. DIGIT OPERATIONS CALCULATOR
+5. DIGIT OPERATIONS CALCULATOR===========
 function sumDigits(num n){
   num total;
   num digit;
@@ -213,4 +213,110 @@ main(){
   out("Sum of digits : " + s);
   out("\n");
   out("Reversed      : " + r);
+} 
+
+
+6. input 2 numbers and show sum===========
+main() {
+      num x;
+      num y;
+      num sum;
+
+      out("Enter 1st number: ");
+      x = in();
+
+      out("Enter 2nd number: ");
+      y = in();
+
+      sum = x + y;
+
+      out("The sum is = " + sum);
+     
+} 
+
+7. half triangle=============
+main(){
+  num i, j;
+	for(i = 1; i <= 5; i++ ) {        
+        for(j = 1; j <= i; j++ ) {    
+            out("*");
+        }
+        out("\n");              
+    }
+} 
+
+7.1 triangle============
+main(){
+  num i, j, n = 5;
+	for(i = 1; i <= n; i++ ) {
+  	for(j = 1; j <= n - i; j++ ) {
+    	out(" ");
+    }
+    for(j = 1; j <= 2 * i - 1; j++ ) {
+   		out("*");
+    }
+      out("\n");
+    }
+} 
+
+
+8. inverted triangle
+main() {
+    num rows = 5;
+    num i,j,s;
+
+    i = rows;
+    while (i >= 1) {
+        s = 1;
+        while (s <= rows - i) {
+            out(" ");
+            s = s + 1;
+        }
+
+        j = 1;
+        while (j <= (2 * i - 1)) {
+            out("*");
+            j = j + 1;
+        }
+
+        out("\n");
+        i = i - 1;
+    }
+} 
+
+9. rectangle
+main() {
+    num side = 5;
+    num i;
+    num j;
+
+    i = 1;
+    while (i <= side) {
+        j = 1;
+        while (j <= side) {
+            out("*");
+            j = j + 1;
+        }
+        out("\n");
+        i = i + 1;
+    }
+} 
+
+10. square
+main() {
+    num length = 10;
+    num width = 4;
+    num i;
+    num j;
+
+    i = 1;
+    while (i <= width) {
+        j = 1;
+        while (j <= length) {
+            out("*");
+            j = j + 1;
+        }
+        out("\n");
+        i = i + 1;
+    }
 } 
