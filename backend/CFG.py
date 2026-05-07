@@ -320,7 +320,7 @@ cfg = {
     "<return_value>": [
         ["<arithmetic_expression>"],
         ["λ"]],
-}
+}#ll1 parser 
 
 def compute_first_set(cfg):
     first_set = {non_terminal: set() for non_terminal in cfg.keys()}
@@ -416,12 +416,12 @@ def compute_predict_set(cfg, first_set, follow_set):
     return predict_set
 
 def gen_parse_table():
-    parse_table = {}
-    for (non_terminal, production), predict in predict_set.items():
-        if non_terminal not in parse_table:
-            parse_table[non_terminal] = {}
+    parse_table = {} #empty dictionary.
+    for (non_terminal, production), predict in predict_set.items():#Iniisa-isa lahat ng productions at predict sets. <dt> = num then predict = num
+        if non_terminal not in parse_table: # Kapag wala pa yung non-terminal sa table,
+            parse_table[non_terminal] = {} #gumagawa muna ng row. para dito nya ccheck kung may laman na
         for terminal in predict:
-            if terminal in parse_table[non_terminal]:
+            if terminal in parse_table[non_terminal]: #Kapag may existing production na dito = conflict
                 raise ValueError(f"Grammar is not LL(1): Conflict in parse table for {non_terminal} and {terminal}")
             parse_table[non_terminal][terminal] = production
 
@@ -437,25 +437,24 @@ class LL1Parser:
         self.cfg = cfg
         self.parse_table = parse_table
         self.follow_set = follow_set
-        self.symbol_stack = []  # Stack for grammar symbols
-        self.input_tokens = []
-        self.index = 0
-        self.errors = []
+        self.symbol_stack = []  #(terminal and non-terminal)
+        self.input_tokens = []#(lexeme, token, line, column)
+        self.index = 0 #pointer
+        self.errors = []#mga error messages
 
     def parse(self, tokens):
         # Initialize stack
         self.symbol_stack = ["$", "<program>"]  # Start with end marker and start symbol
-        self.input_tokens = tokens + [("$", "$", -1, 0)]  # Append EOF
+        self.input_tokens = tokens + [("$", "$", -1, 0)]  #end marker token
         self.index = 0
         self.errors = []
         
-        while self.symbol_stack:
-            top_symbol = self.symbol_stack.pop()
-            
-            current_lexeme = self.input_tokens[self.index][0]
-            current_token = self.input_tokens[self.index][1]  # Token type
+        while self.symbol_stack:#if may laman
+            top_symbol = self.symbol_stack.pop()#andun sa top yung last element ng stack, tapos tatanggalin niya yun sa stack (LIFO behavior) inisstore nya sa top symbol
+            current_lexeme = self.input_tokens[self.index][0] #[0] is lexeme, [1] is token type, [2] is line number, [3] is column position
+            current_token = self.input_tokens[self.index][1]  # Token type 
             current_line = self.input_tokens[self.index][2]   # Line number
-            current_column = self.input_tokens[self.index][3] # Column position
+            current_column = self.input_tokens[self.index][3] # Column position pag may error madali makikita
 
             # Skip null productions
             if top_symbol == "λ":
@@ -463,8 +462,8 @@ class LL1Parser:
 
             # Terminal match
             if top_symbol not in self.cfg:  # a terminal
-                if top_symbol == current_token:
-                    self.index += 1
+                if top_symbol == current_token: #if match It is correct
+                    self.index += 1 #move forward yarn
                 else:
                     # Terminal mismatch = syntax error
                     self.syntax_error(current_line, current_lexeme, {top_symbol}, current_column, top_symbol)
@@ -494,12 +493,12 @@ class LL1Parser:
                     return False, self.errors
         
         # Check if we processed all input
-        if self.index < len(self.input_tokens) - 1:
-            remaining_token = self.input_tokens[self.index]
-            self.syntax_error(remaining_token[2], remaining_token[0], {"EOF"}, remaining_token[3], None)
-            return False, self.errors
+        if self.index < len(self.input_tokens) - 1:#there are still tokens left unprocessed | last index - 1
+            remaining_token = self.input_tokens[self.index] #Gets the current unprocessed token. Stored as remaining_token
+            self.syntax_error(remaining_token[2], remaining_token[0], {"EOF"}, remaining_token[3], None) #added line and column info for better error reporting. expect EOF but found remaining token
+            return False, self.errors #if there are still tokens left unprocessed, it's a syntax error. Report unexpected token and expected EOF.
 
-        return True, []
+        return True, [] #if we successfully processed all input without errors, return True and an empty error list.
 
     def syntax_error(self, line, found, expected, column, context_symbol):
         if line == -1 and column == 0:  # Use last valid line number if not set
