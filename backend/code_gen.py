@@ -787,7 +787,7 @@ class CodeGenerator:
 
             elif isinstance(instr, TACArrayDeclare):
                 dims_str = "".join(f"[{d}]" for d in instr.dims)
-                if instr.init is not None:
+                if instr.init:   # only emit init if list is non-empty
                     line(f"{instr.c_type} {instr.name}{dims_str} = {self._fmt_array_init(instr.init)};")
                 else:
                     line(f"{instr.c_type} {instr.name}{dims_str};")
