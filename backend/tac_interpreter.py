@@ -285,7 +285,12 @@ class TACInterpreter:
             try: text = str(int(val))
             except: text = str(val)
         elif fmt == "%f":
-            try: text = f"{float(val):.6f}"
+            try:
+                f = float(val)
+                # Remove trailing zeros but keep at least one decimal place
+                text = f"{f:.10f}".rstrip('0').rstrip('.')
+                if '.' not in text:
+                    text += '.0'
             except: text = str(val)
         elif fmt == "%c":  text = str(val)
         else:
